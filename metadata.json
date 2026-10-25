@@ -1,0 +1,6 @@
+{
+  "name": "AniStream",
+  "description": "Sleek anime streaming app with trending rows, search, watchlist, episode playback, and AniList GraphQL integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
