@@ -2,7 +2,6 @@ package com.example.ui.screens.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.config.VideoConfig
 import com.example.config.VideoSource
 import com.example.data.model.Anime
 import com.example.data.repository.AnimeRepository
@@ -52,7 +51,7 @@ class PlayerViewModel(
                         savedProgress.currentPositionMs
                     } else 0L
 
-                    val source = VideoConfig.getEpisodeSource(animeId, safeEp)
+                    val source = repository.getEpisodeSource(animeId, safeEp)
 
                     _state.value = _state.value.copy(
                         anime = anime,
@@ -65,7 +64,7 @@ class PlayerViewModel(
                 }
                 .onFailure { error ->
                     val fallback = com.example.data.api.FallbackData.getAnimeById(animeId)
-                    val source = VideoConfig.getEpisodeSource(animeId, episode)
+                    val source = repository.getEpisodeSource(animeId, episode)
                     _state.value = _state.value.copy(
                         anime = fallback,
                         currentEpisode = episode,
