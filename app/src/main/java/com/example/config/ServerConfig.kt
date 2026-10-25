@@ -5,7 +5,7 @@ package com.example.config
  * Example: "https://animexz-yourname.koyeb.app"
  */
 object ServerConfig {
-    const val BASE_URL = "https://YOUR-APP-NAME.koyeb.app"
+    const val BASE_URL = "https://logical-edyth-jsusuhdgdhd-998600dd.koyeb.app"
 
     /** Server ke apne anime IDs is number se start hote hain (AniList IDs se alag). */
     const val CUSTOM_ID_START = 1_000_000
