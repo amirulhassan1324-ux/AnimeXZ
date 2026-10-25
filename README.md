@@ -1,64 +1,49 @@
-# AniStream - Anime Streaming App
+# AniStream
 
-AniStream is a high-performance anime streaming application built with **Jetpack Compose**, **Material 3**, and **Kotlin** for Android, featuring AniList GraphQL integration, custom ExoPlayer video streaming with resume position, and local Room database persistence.
+![Build](https://github.com/amirulhassan1324-ux/AnimeXZ/actions/workflows/android.yml/badge.svg)
 
----
+An anime streaming app for Android built with **Jetpack Compose**, **Material 3** and **Kotlin**. It pulls anime metadata from the AniList GraphQL API, plays video with Media3 ExoPlayer (resume position included), and keeps your list and watch progress in a local Room database.
 
-## 📱 Features & Screens
+## ⬇️ Download
 
-1. **Home Screen**
-   - **Hero Banner:** Featured anime with #1 Trending badge, rating, Play button, and Details button.
-   - **Continue Watching:** Horizontal row displaying in-progress anime with episode indicators, visual progress bars, and single-tap resume.
-   - **Trending Now:** Popular and trending anime titles updated from AniList GraphQL API.
-   - **Most Popular & Top Rated:** Categorized rows with ratings, cover art, and titles.
-   - **Loading & Error Handling:** Skeleton states and retry mechanics.
+**[Download the latest APK](https://github.com/amirulhassan1324-ux/AnimeXZ/releases/latest/download/AniStream.apk)**
 
-2. **Search Screen**
-   - **Debounced Search:** Reactive 350ms debounced queries querying AniList titles in English and Romaji/Japanese.
-   - **3-Column Results Grid:** Clean layout matching the design specifications.
-   - **Empty & Idle States:** Polished purple iconography and helpful search cues.
+1. Open the link on your Android phone and download `AniStream.apk`.
+2. Tap the file to install. When Android asks, allow **Install unknown apps** for your browser or file manager.
+3. Open **AniStream**.
 
-3. **Detail Screen**
-   - **Cinematic Banner & Poster:** High-resolution backdrops with smooth gradient fades.
-   - **Metadata:** Format (TV/Movie/ONA), Release year, average community score, episode count, and animation studio.
-   - **Watchlist Toggle:** One-tap "Add to my list" with local Room database persistence.
-   - **Expandable Synopsis:** Clean typography with "Read more / Show less" toggle.
-   - **Genre Chips:** Styled purple pill chips.
-   - **Episode List:** Episode thumbnails, episode numbers, runtime, watched progress bars, and direct playback buttons.
+The APK is rebuilt automatically by GitHub Actions on every push to `main`, so the link always points to the newest build. Every build is signed with the same debug key, so a new build installs over the old one without uninstalling.
 
-4. **Video Player Screen**
-   - **ExoPlayer (Media3):** Support for both `.mp4` and `.m3u8` (HLS adaptive bitrate) video streams.
-   - **Watch Progress & Resume:** Automatically saves playback timestamp and resumes from the last position.
-   - **Playback Controls:** Play/Pause, 10s Rewind, 10s Fast-Forward, interactive seekbar with current and total duration timestamps.
-   - **Episode Navigation:** Next Episode and Previous Episode buttons.
-   - **Playback Speed Selector:** 0.75x, 1.0x, 1.25x, 1.5x, 2.0x speeds.
-   - **Auto-Hiding Controls:** Immersive viewing experience with tap-to-reveal controls.
+> This is a **debug** build for testing, not a Play Store release.
 
-5. **My List (Watchlist) Screen & Episode Release Alerts**
-   - **Saved Anime Grid:** 3-column responsive grid showing user's saved titles with item counter ("N saved").
-   - **Background Episode Monitor:** Background task (WorkManager) checks for new episode airings every 6 hours with network connectivity constraints.
-   - **Local Notifications:** Dispatches high-priority heads-up notifications when a saved anime has a new episode released.
-   - **Direct Play Launch:** Tapping on a release notification opens the app directly into the video player for that episode.
-   - **Manual & Test Controls:** Includes an on-demand update check button and a "Test Alert" simulation trigger in My List.
-   - **Empty State:** Matching custom empty state with "Browse trending" shortcut.
+You can also grab the APK from the **Actions** tab: open a run and download the `AniStream-debug-apk` artifact.
 
----
+## Screens
 
-## 🔔 Local Notification & Background Task Details
+| Screen | What it does |
+| --- | --- |
+| **Home** | Hero banner with the #1 trending title, Continue Watching row, Trending now, Most popular and Top rated rows. Loading and error states with retry. |
+| **Search** | Debounced (350 ms) search by English or Romaji/Japanese title, shown in a 3-column grid. |
+| **Detail** | Banner and poster, format / year / score / episode count / studio, genre chips, expandable synopsis, "Add to my list" toggle, episode list with watched-progress bars. |
+| **Player** | ExoPlayer with `.mp4` and `.m3u8` (HLS) support, resume from last position, play/pause, ±10 s seek, seekbar, previous/next episode, playback speed (0.75x - 2.0x), auto-hiding controls. |
+| **My List** | Saved anime in a 3-column grid, plus background new-episode alerts. |
 
-- **WorkManager Task:** `com.example.notification.EpisodeUpdateWorker` runs periodically in the background (configured for every 6 hours) with `NetworkType.CONNECTED` constraint.
-- **Notification Channel:** `NotificationHelper.CHANNEL_ID = "anime_episode_releases"` (High importance, vibration, purple accent light).
-- **Permissions:** Android 13+ `POST_NOTIFICATIONS` runtime permission with in-app permission requester.
-- **Deep Linking:** Launching from a notification passes `EXTRA_ANIME_ID` and `EXTRA_EPISODE_NUMBER`, routing the player immediately to the newly released episode.
+### Episode release alerts
 
+- `EpisodeUpdateWorker` (WorkManager) checks AniList every 6 hours when the device is online.
+- When a saved anime has a new episode, `NotificationHelper` posts a heads-up notification on the `anime_episode_releases` channel (Android 13+ asks for the `POST_NOTIFICATIONS` permission).
+- Tapping the notification opens the player directly on the new episode.
+- My List has a manual "check now" button and a "Test Alert" button.
 
-## 🎬 Video Source Configuration
+## Video source
 
-Video lookup is centralized in:
-- **Kotlin (Android):** `com.example.config.VideoConfig.getEpisodeSource(animeId, episode)`
-- **TypeScript:** `src/config/video.ts` (`getEpisodeSource(animeId, episode)`)
+All episode lookups go through one function, in two places that should be kept in sync:
 
-To connect your licensed streaming backend, adjust the stream URL logic in `src/config/video.ts` and `VideoConfig.kt`:
+- Android: `com.example.config.VideoConfig.getEpisodeSource(animeId, episode)`
+- TypeScript: `src/config/video.ts`
+
+**Right now it returns public sample videos** (Big Buck Bunny and similar, plus a Mux test HLS stream) so the player can be tested. It does not stream real anime episodes. To connect your own licensed streaming backend, change the URL logic:
+
 ```kotlin
 fun getEpisodeSource(animeId: Int, episode: Int): VideoSource {
     return VideoSource(
@@ -69,34 +54,38 @@ fun getEpisodeSource(animeId: Int, episode: Int): VideoSource {
 }
 ```
 
----
+Only stream content you have the rights to.
 
-## 🛠️ Architecture & Tech Stack
+## Tech stack
 
-- **UI:** Jetpack Compose + Material Design 3
-- **Network & API:** OkHttp, AniList GraphQL API (`https://graphql.anilist.co`)
-- **Image Loading:** Coil Compose
-- **Video Player:** AndroidX Media3 ExoPlayer (`media3-exoplayer`, `media3-ui`, `media3-exoplayer-hls`)
-- **Local Persistence:** AndroidX Room Database (`WatchlistDao`, `WatchProgressDao`)
-- **Navigation:** Navigation Compose (`NavHost`)
-- **State Management:** MVVM with Kotlin Coroutines & `StateFlow`
+- **UI:** Jetpack Compose, Material 3, Navigation Compose
+- **Architecture:** MVVM with Kotlin Coroutines and `StateFlow`
+- **Network:** OkHttp, Retrofit, Moshi, AniList GraphQL (`https://graphql.anilist.co`)
+- **Images:** Coil
+- **Video:** AndroidX Media3 (`exoplayer`, `ui`, `exoplayer-hls`)
+- **Storage:** Room (`WatchlistDao`, `WatchProgressDao`)
+- **Background work:** WorkManager
 
----
+## Build it yourself
 
-## 🚀 Setup & Build Steps
+**On GitHub (no setup):** push to `main`. The workflow in `.github/workflows/android.yml` builds the debug APK and publishes it to the **Releases** page. You can also run it by hand from the **Actions** tab with **Run workflow**.
 
-1. **Prerequisites:**
-   - Android Studio Ladybug (2024.2+) or higher
-   - JDK 17 / 21
-   - Android SDK 35/36
+**Locally:**
 
-2. **Run on Android Device or Emulator:**
-   ```bash
-   gradle assembleDebug
-   ```
-   Or click **Run** in Android Studio.
+Requirements: a recent Android Studio, JDK 17+, Android SDK 36.
 
-3. **Run Unit Tests:**
-   ```bash
-   gradle :app:testDebugUnitTest
-   ```
+```bash
+# the build expects a debug keystore at the project root
+cp ci/ci-debug.keystore debug.keystore
+
+./gradlew assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
+```
+
+Unit tests: `./gradlew :app:testDebugUnitTest`
+
+## Project notes
+
+- `ci/ci-debug.keystore` is the shared **debug** signing key used by CI (the standard `android` debug password). It is only for debug builds. A Play Store release needs your own private keystore, supplied through the `KEYSTORE_PATH`, `STORE_PASSWORD` and `KEY_PASSWORD` environment variables that the `release` signing config reads.
+- `google-services.json` is not included. The build only warns about this because the project sets `googleServices.missing.passthrough=true`.
+- `.env` is git-ignored. Defaults come from `.env.example`.
