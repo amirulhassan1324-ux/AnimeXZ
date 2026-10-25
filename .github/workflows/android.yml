@@ -30,8 +30,13 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Ye workflow akeli file ke bharose chalti hai: repo me gradlew / gradle-wrapper.jar na ho
+      # tab bhi chalegi. Gradle ka wahi version install hota hai jo
+      # gradle/wrapper/gradle-wrapper.properties me hai (9.3.1).
       - name: Set up Gradle (with caching)
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
 
       # compileSdk 36.1 wagairah ke liye AGP SDK components khud download karta hai,
       # bas licenses accept honi chahiye.
@@ -39,17 +44,64 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       # app/build.gradle.kts debug build ke liye ${rootDir}/debug.keystore maangta hai, lekin wo
-      # .gitignore me hai. Repo me ek fixed debug keystore (ci/ci-debug.keystore) hai, taaki har
-      # build ka signature same rahe aur purani install ke upar update install ho sake.
-      - name: Use CI debug keystore
-        run: cp ci/ci-debug.keystore debug.keystore
-
-      # Web/phone se upload karne par executable permission chali jaati hai, isliye explicitly set karte hain.
-      - name: Make gradlew executable
-        run: chmod +x gradlew
+      # .gitignore me hai. Ye ek FIXED debug keystore hai (standard debug password "android"),
+      # base64 me yahin embed hai. Isse har build ka signature same rehta hai aur nayi APK purani
+      # install ke upar update ho jaati hai. Sirf debug builds ke liye; koi secret nahi hai.
+      - name: Create debug keystore
+        run: |
+          base64 -d > debug.keystore <<'KEYSTORE_EOF'
+          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
+          KEYSTORE_EOF
+          keytool -list -keystore debug.keystore -storepass android | grep androiddebugkey
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/*.apk AniStream.apk
