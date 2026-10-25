@@ -19,7 +19,8 @@ sealed interface HomeUiState {
         val featured: Anime,
         val trending: List<Anime>,
         val popular: List<Anime>,
-        val topRated: List<Anime>
+        val topRated: List<Anime>,
+        val serverAnime: List<Anime> = emptyList()
     ) : HomeUiState
     data class Error(val message: String) : HomeUiState
 }
@@ -41,12 +42,14 @@ class HomeViewModel(private val repository: AnimeRepository) : ViewModel() {
             _uiState.value = HomeUiState.Loading
             repository.getHomeSections()
                 .onSuccess { data ->
-                    val featured = data.trending.firstOrNull() ?: data.popular.first()
+                    val serverAnime = repository.getServerAnime()
+                    val featured = serverAnime.firstOrNull() ?: data.trending.firstOrNull() ?: data.popular.first()
                     _uiState.value = HomeUiState.Success(
                         featured = featured,
                         trending = data.trending,
                         popular = data.popular,
-                        topRated = data.topRated
+                        topRated = data.topRated,
+                        serverAnime = serverAnime
                     )
                 }
                 .onFailure { error ->
