@@ -1,127 +1,164 @@
-package com.example.ui.screens.player
+package com.example.notification
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.example.config.VideoSource
-import com.example.data.model.Anime
-import com.example.data.repository.AnimeRepository
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import android.content.Context
+import android.util.Log
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.example.data.api.AniListGraphQLClient
+import com.example.data.local.AppDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 
-data class PlayerState(
-    val anime: Anime? = null,
-    val currentEpisode: Int = 1,
-    val totalEpisodes: Int = 12,
-    val videoSource: VideoSource? = null,
-    val initialPositionMs: Long = 0L,
-    val isPlaying: Boolean = true,
-    val currentPositionMs: Long = 0L,
-    val durationMs: Long = 0L,
-    val playbackSpeed: Float = 1.0f,
-    val isLoading: Boolean = true,
-    val errorMessage: String? = null
-)
+class EpisodeUpdateWorker(
+    appContext: Context,
+    workerParams: WorkerParameters
+) : CoroutineWorker(appContext, workerParams) {
 
-class PlayerViewModel(
-    private val animeId: Int,
-    initialEpisode: Int,
-    private val repository: AnimeRepository
-) : ViewModel() {
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Starting background check for anime episode updates...")
 
-    private val _state = MutableStateFlow(
-        PlayerState(currentEpisode = initialEpisode)
-    )
-    val state: StateFlow<PlayerState> = _state.asStateFlow()
+        val context = applicationContext
+        val db = AppDatabase.getInstance(context)
+        val api = AniListGraphQLClient()
 
-    init {
-        loadAnimeAndEpisode(initialEpisode)
-    }
+        try {
+            val watchlist = db.watchlistDao().getAllWatchlistList()
+            if (watchlist.isEmpty()) {
+                Log.d(TAG, "Watchlist is empty. No updates to check.")
+                return@withContext Result.success()
+            }
 
-    fun loadAnimeAndEpisode(episode: Int) {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = true, currentEpisode = episode)
-            repository.getAnimeDetail(animeId)
-                .onSuccess { anime ->
-                    val totalEps = anime.episodes ?: 12
-                    val safeEp = episode.coerceIn(1, totalEps)
-                    val savedProgress = repository.getProgress(animeId)
-                    val initialPos = if (savedProgress?.episodeNumber == safeEp) {
-                        savedProgress.currentPositionMs
-                    } else 0L
+            for (item in watchlist) {
+                try {
+                    val anime = if (item.animeId >= com.example.config.ServerConfig.CUSTOM_ID_START) {
+                        com.example.data.api.ServerApi.getAnime(item.animeId) ?: continue
+                    } else {
+                        api.getAnimeDetail(item.animeId).getOrNull() ?: continue
+                    }
 
-                    val source = repository.getEpisodeSource(animeId, safeEp)
+                    val latestEp = anime.episodes ?: 12
+                    val previousNotified = item.lastNotifiedEpisode
 
-                    _state.value = _state.value.copy(
-                        anime = anime,
-                        currentEpisode = safeEp,
-                        totalEpisodes = totalEps,
-                        videoSource = source,
-                        initialPositionMs = initialPos,
-                        isLoading = false
-                    )
+                    // If latest episode count is greater than previously notified episode
+                    if (latestEp > previousNotified && previousNotified > 0) {
+                        Log.d(TAG, "New episode detected for ${item.title}: Ep $latestEp (was $previousNotified)")
+                        NotificationHelper.showEpisodeNotification(
+                            context = context,
+                            animeId = item.animeId,
+                            animeTitle = item.title,
+                            episodeNumber = latestEp,
+                            coverImageUrl = item.coverImage
+                        )
+                        db.watchlistDao().updateEpisodeReleaseState(
+                            animeId = item.animeId,
+                            latestEp = latestEp,
+                            notifiedEp = latestEp
+                        )
+                    } else if (previousNotified == 0) {
+                        // Initialize baseline on first check
+                        db.watchlistDao().updateEpisodeReleaseState(
+                            animeId = item.animeId,
+                            latestEp = latestEp,
+                            notifiedEp = latestEp
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error checking updates for anime ${item.title}", e)
                 }
-                .onFailure { error ->
-                    val fallback = com.example.data.api.FallbackData.getAnimeById(animeId)
-                    val source = repository.getEpisodeSource(animeId, episode)
-                    _state.value = _state.value.copy(
-                        anime = fallback,
-                        currentEpisode = episode,
-                        totalEpisodes = fallback.episodes ?: 12,
-                        videoSource = source,
-                        initialPositionMs = 0L,
-                        isLoading = false
-                    )
-                }
+            }
+
+            Result.success()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to complete EpisodeUpdateWorker", e)
+            Result.retry()
         }
     }
 
-    fun onProgressUpdate(positionMs: Long, durationMs: Long) {
-        _state.value = _state.value.copy(
-            currentPositionMs = positionMs,
-            durationMs = durationMs
-        )
-    }
+    companion object {
+        private const val TAG = "EpisodeUpdateWorker"
+        const val PERIODIC_WORK_TAG = "anime_episode_update_periodic"
+        const val ONE_TIME_WORK_TAG = "anime_episode_update_onetime"
 
-    fun saveWatchProgress(positionMs: Long, durationMs: Long) {
-        val anime = _state.value.anime ?: return
-        viewModelScope.launch {
-            repository.saveProgress(
-                animeId = anime.id,
-                episodeNumber = _state.value.currentEpisode,
-                animeTitle = anime.title,
-                coverImage = anime.coverImage,
-                bannerImage = anime.bannerImage,
-                currentPositionMs = positionMs,
-                durationMs = durationMs
+        /**
+         * Schedules the periodic background worker to check for new episodes.
+         */
+        fun schedule(context: Context) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val periodicRequest = PeriodicWorkRequestBuilder<EpisodeUpdateWorker>(
+                repeatInterval = 6,
+                repeatIntervalTimeUnit = TimeUnit.HOURS
+            )
+                .setConstraints(constraints)
+                .addTag(PERIODIC_WORK_TAG)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                PERIODIC_WORK_TAG,
+                ExistingPeriodicWorkPolicy.KEEP,
+                periodicRequest
+            )
+            Log.d(TAG, "Periodic episode check background task scheduled (every 6 hours).")
+        }
+
+        /**
+         * Runs an immediate background check for testing and on-demand refresh.
+         */
+        fun runImmediately(context: Context) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val oneTimeRequest = OneTimeWorkRequestBuilder<EpisodeUpdateWorker>()
+                .setConstraints(constraints)
+                .addTag(ONE_TIME_WORK_TAG)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                ONE_TIME_WORK_TAG,
+                ExistingWorkPolicy.REPLACE,
+                oneTimeRequest
+            )
+            Log.d(TAG, "Immediate episode check background task enqueued.")
+        }
+
+        /**
+         * Simulates a newly released episode for testing and demo purposes,
+         * firing the local notification immediately.
+         */
+        suspend fun simulateEpisodeRelease(
+            context: Context,
+            animeId: Int,
+            simulatedEpisode: Int? = null
+        ) = withContext(Dispatchers.IO) {
+            val db = AppDatabase.getInstance(context)
+            val item = db.watchlistDao().getWatchlistEntity(animeId) ?: return@withContext
+
+            val nextEp = simulatedEpisode ?: ((item.latestReleasedEpisode.coerceAtLeast(1)) + 1)
+
+            NotificationHelper.showEpisodeNotification(
+                context = context,
+                animeId = item.animeId,
+                animeTitle = item.title,
+                episodeNumber = nextEp,
+                coverImageUrl = item.coverImage
+            )
+
+            db.watchlistDao().updateEpisodeReleaseState(
+                animeId = item.animeId,
+                latestEp = nextEp,
+                notifiedEp = nextEp
             )
         }
-    }
-
-    fun playNextEpisode(): Boolean {
-        val current = _state.value.currentEpisode
-        val total = _state.value.totalEpisodes
-        if (current < total) {
-            // Save progress of current episode
-            saveWatchProgress(_state.value.currentPositionMs, _state.value.durationMs)
-            loadAnimeAndEpisode(current + 1)
-            return true
-        }
-        return false
-    }
-
-    fun playPreviousEpisode(): Boolean {
-        val current = _state.value.currentEpisode
-        if (current > 1) {
-            saveWatchProgress(_state.value.currentPositionMs, _state.value.durationMs)
-            loadAnimeAndEpisode(current - 1)
-            return true
-        }
-        return false
-    }
-
-    fun setPlaybackSpeed(speed: Float) {
-        _state.value = _state.value.copy(playbackSpeed = speed)
     }
 }
