@@ -23,7 +23,8 @@
 
 <div class="card">
   <input id="key" type="password" placeholder="Admin Key (ADMIN_KEY)">
-  <button class="sec" onclick="saveKey()">Save Key</button>
+  <button id="saveBtn" type="button">Save Key</button>
+  <div id="keyStatus"><small>Key daalke Save Key dabao.</small></div>
 </div>
 
 <h2>1. File upload (photo / video)</h2>
@@ -65,10 +66,27 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-$('key').value = localStorage.getItem('adminKey') || '';
+let memKey = '';
+function getKey(){ try { return localStorage.getItem('adminKey') || memKey; } catch { return memKey; } }
+function setKey(v){ memKey = v; try { localStorage.setItem('adminKey', v); } catch {} }
+$('key').value = getKey();
 let lastUrl = '';
-const H = () => ({ 'Content-Type': 'application/json', 'x-admin-key': localStorage.getItem('adminKey') || '' });
-function saveKey(){ localStorage.setItem('adminKey', $('key').value.trim()); refresh(); }
+const H = () => ({ 'Content-Type': 'application/json', 'x-admin-key': getKey() });
+async function saveKey(){
+  const v = $('key').value.trim();
+  if(!v){ $('keyStatus').innerHTML = '<small style="color:#ff8a80">Pehle Admin Key daalo</small>'; return; }
+  setKey(v);
+  $('keyStatus').innerHTML = '<small>Check ho raha hai...</small>';
+  try {
+    await api('/api/files',{headers:H()});
+    $('keyStatus').innerHTML = '<small style="color:#8be9a8">Saved ✓ Key sahi hai</small>';
+    refresh();
+  } catch(e) {
+    $('keyStatus').innerHTML = '<small style="color:#ff8a80">Galat key ya server error: '+esc(e.message)+'</small>';
+  }
+}
+$('saveBtn').addEventListener('click', saveKey);
+$('key').addEventListener('keydown', e => { if(e.key === 'Enter') saveKey(); });
 async function api(path, opt={}) {
   const r = await fetch(path, opt); const j = await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(j.error || r.status); return j;
@@ -77,7 +95,7 @@ function upload(){
   const f = $('file').files[0]; if(!f) return alert('File chuno');
   const fd = new FormData(); fd.append('file', f);
   const x = new XMLHttpRequest(); x.open('POST','/api/upload');
-  x.setRequestHeader('x-admin-key', localStorage.getItem('adminKey')||'');
+  x.setRequestHeader('x-admin-key', getKey());
   x.upload.onprogress = e => { if(e.lengthComputable) $('upStatus').textContent = 'Uploading ' + Math.round(e.loaded/e.total*100) + '%'; };
   x.onload = () => { let j={}; try{j=JSON.parse(x.responseText)}catch{}
     if(x.status===200){ lastUrl=j.url; $('upStatus').textContent='Done: '+j.name; $('upUrl').textContent=j.url; refresh(); }
