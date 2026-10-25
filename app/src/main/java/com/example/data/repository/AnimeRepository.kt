@@ -1,6 +1,10 @@
 package com.example.data.repository
 
+import com.example.config.ServerConfig
+import com.example.config.VideoConfig
+import com.example.config.VideoSource
 import com.example.data.api.AniListGraphQLClient
+import com.example.data.api.ServerApi
 import com.example.data.api.HomeData
 import com.example.data.local.AppDatabase
 import com.example.data.local.WatchProgressEntity
@@ -22,10 +26,19 @@ class AnimeRepository(
     }
 
     suspend fun search(query: String): Result<List<Anime>> {
-        return api.searchAnime(query)
+        val serverResults = ServerApi.getAnimeList(query)
+        return api.searchAnime(query).map { serverResults + it }
     }
 
+    suspend fun getServerAnime(): List<Anime> = ServerApi.getAnimeList()
+
+
     suspend fun getAnimeDetail(animeId: Int): Result<Anime> {
+        if (animeId >= ServerConfig.CUSTOM_ID_START) {
+            val anime = ServerApi.getAnime(animeId)
+                ?: return Result.failure(Exception("Server se anime load nahi hua. FQDN check karo."))
+            return Result.success(anime)
+        }
         return api.getAnimeDetail(animeId)
     }
 
@@ -105,22 +118,37 @@ class AnimeRepository(
     }
 
     suspend fun getEpisodesForAnime(anime: Anime): List<AnimeEpisode> {
-        val count = (anime.episodes ?: 12).coerceIn(1, 48)
         val progress = database.watchProgressDao().getProgress(anime.id)
-        return (1..count).map { epNum ->
+        val durationMs = (anime.durationMinutes ?: 24) * 60 * 1000L
+        val serverEpisodes = ServerApi.getEpisodes(anime.id).associateBy { it.episodeNumber }
+        val isCustom = anime.id >= ServerConfig.CUSTOM_ID_START
+
+        val numbers: List<Int> = if (isCustom) {
+            serverEpisodes.keys.sorted()
+        } else {
+            val count = (anime.episodes ?: 12).coerceIn(1, 48)
+            (1..maxOf(count, serverEpisodes.keys.maxOrNull() ?: 0)).toList()
+        }
+
+        return numbers.map { epNum ->
             val isCurrentEp = progress?.episodeNumber == epNum
             val progressMs = if (isCurrentEp) (progress?.currentPositionMs ?: 0L) else 0L
-            val durationMs = (anime.durationMinutes ?: 24) * 60 * 1000L
+            val server = serverEpisodes[epNum]
 
             AnimeEpisode(
                 animeId = anime.id,
                 episodeNumber = epNum,
-                title = "Episode $epNum",
-                durationMinutes = anime.durationMinutes ?: 24,
-                thumbnail = anime.bannerImage ?: anime.coverImage,
+                title = server?.title ?: "Episode $epNum",
+                durationMinutes = server?.durationMinutes ?: (anime.durationMinutes ?: 24),
+                thumbnail = server?.thumbnail ?: anime.bannerImage ?: anime.coverImage,
                 progressMs = progressMs,
                 durationMs = durationMs
             )
         }
+    }
+
+    /** Pehle Koyeb server ka stream URL, na mile to purane sample videos. */
+    suspend fun getEpisodeSource(animeId: Int, episode: Int): VideoSource {
+        return ServerApi.getStream(animeId, episode) ?: VideoConfig.getEpisodeSource(animeId, episode)
     }
 }
