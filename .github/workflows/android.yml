@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Sirf PR builds cancel hoti hain; main par chalti hui release publish beech me nahi rukti.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-debug-apk:
@@ -37,17 +38,11 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      # app/build.gradle.kts debug build ke liye ${rootDir}/debug.keystore maangta hai,
-      # lekin ye file .gitignore me hai. Isliye CI me standard Android debug keystore banate hain.
-      - name: Create debug keystore
-        run: |
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+      # app/build.gradle.kts debug build ke liye ${rootDir}/debug.keystore maangta hai, lekin wo
+      # .gitignore me hai. Repo me ek fixed debug keystore (ci/ci-debug.keystore) hai, taaki har
+      # build ka signature same rahe aur purani install ke upar update install ho sake.
+      - name: Use CI debug keystore
+        run: cp ci/ci-debug.keystore debug.keystore
 
       # Web/phone se upload karne par executable permission chali jaati hai, isliye explicitly set karte hain.
       - name: Make gradlew executable
@@ -56,11 +51,43 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/*.apk AniStream.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AniStream-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: AniStream.apk
           if-no-files-found: error
           retention-days: 30
-          
+
+  # Har successful build ke baad APK ek GitHub Release (tag: latest) me daal deta hai.
+  # Fixed download link: https://github.com/<owner>/<repo>/releases/latest/download/AniStream.apk
+  publish-release:
+    name: Publish download link
+    needs: build-debug-apk
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: AniStream-debug-apk
+
+      - name: Publish "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create latest AniStream.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "AniStream - latest build" \
+            --notes "Debug APK built automatically from commit ${GITHUB_SHA::7}. Install it on Android (allow 'Install unknown apps' when asked)." \
+            --latest
+            
