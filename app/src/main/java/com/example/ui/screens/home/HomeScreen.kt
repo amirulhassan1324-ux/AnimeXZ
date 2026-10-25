@@ -139,6 +139,28 @@ fun HomeScreen(
                         }
                     }
 
+                    // Koyeb server (apne upload kiye anime)
+                    if (state.serverAnime.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(18.dp))
+                            SectionHeader(title = "My Server")
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("server_row")
+                            ) {
+                                items(state.serverAnime, key = { it.id }) { anime ->
+                                    AnimePosterCard(
+                                        anime = anime,
+                                        onClick = { onNavigateToDetail(anime.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Trending now row
                     item {
                         Spacer(modifier = Modifier.height(18.dp))
