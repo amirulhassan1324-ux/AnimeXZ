@@ -50,8 +50,20 @@ const episodeOut = (req, e) => ({
 
 function guessType(u = '') { return /\.m3u8(\?|$)/i.test(u) ? 'm3u8' : 'mp4'; }
 
+const MIME_BY_EXT = {
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mkv: 'video/x-matroska', mov: 'video/quicktime',
+  m3u8: 'application/vnd.apple.mpegurl', ts: 'video/mp2t', vtt: 'text/vtt', srt: 'application/x-subrip',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif'
+};
+// Browser/phone kabhi file ko generic type se bhejta hai, to naam ke extension se sahi type nikalo
+function resolveContentType(stored, filename = '') {
+  if (stored && stored !== 'application/octet-stream') return stored;
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  return MIME_BY_EXT[ext] || stored || 'application/octet-stream';
+}
+
 // ---------- Public API (app use karta hai) ----------
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api/health', (req, res) => res.json({ ok: true, version: 2, time: Date.now() }));
 
 app.get('/api/anime', async (req, res) => {
   const q = (req.query.q || '').toString().trim();
@@ -133,6 +145,34 @@ app.delete('/api/anime/:id/episodes/:number', requireAdmin, async (req, res) => 
   res.json({ ok: true });
 });
 
+// Link test: admin panel me dalne se pehle check karo ki video link chal raha hai ya nahi
+app.post('/api/check-url', requireAdmin, async (req, res) => {
+  let url = String((req.body && req.body.url) || '').trim();
+  if (url.startsWith('/')) url = baseUrl(req) + url; // /files/<id> bhi chalega
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error: 'http:// ya https:// link do' });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const r = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-1023' }, signal: ctrl.signal, redirect: 'follow' });
+    const contentType = r.headers.get('content-type') || '';
+    const range = r.headers.get('content-range') || '';
+    const size = Number((range.split('/')[1] || r.headers.get('content-length') || 0)) || null;
+    try { await r.body?.cancel(); } catch {}
+    let type = guessType(url);
+    if (/mpegurl/i.test(contentType)) type = 'm3u8';
+    const playable = /video|mpegurl|octet-stream|mp2t|matroska/i.test(contentType) || /\.(mp4|m4v|webm|mkv|mov|m3u8|ts)(\?|$)/i.test(url);
+    res.json({
+      ok: r.ok || r.status === 206, status: r.status, contentType, size, type, playable,
+      seekable: r.status === 206 || /bytes/i.test(r.headers.get('accept-ranges') || ''),
+      url
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.name === 'AbortError' ? 'Timeout (10 sec me jawab nahi aaya)' : e.message });
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 // ---------- Upload (photo / video / subtitle) -> MongoDB GridFS ----------
 app.post('/api/upload', requireAdmin, (req, res) => {
   let bb;
@@ -176,7 +216,7 @@ app.get('/files/:id', async (req, res) => {
   const f = await db.collection('fs.files').findOne({ _id: id });
   if (!f) return res.status(404).end();
 
-  const type = f.metadata?.contentType || 'application/octet-stream';
+  const type = resolveContentType(f.metadata?.contentType, f.filename);
   const size = f.length;
   res.set({ 'Accept-Ranges': 'bytes', 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' });
 
